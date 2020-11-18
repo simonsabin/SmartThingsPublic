@@ -17,7 +17,7 @@
  */
 metadata {
 	definition (name: "camera", author: "sms") {
-		capability "Sensor"
+		capability "DoorControl"
 		capability "Switch"
         capability "Refresh"
 		attribute "hubactionMode", "string"
@@ -35,63 +35,96 @@ metadata {
 	}
 
     tiles {
-    	carouselTile("cameraDetails", "device.image", width: 3, height: 2) { }
-        standardTile("take", "device.image", width: 1, height: 1, canChangeIcon: false, inactiveLabel: true, canChangeBackground: false) {
-            state "take", label: "Take", action: "Image Capture.take", icon: "st.camera.camera", backgroundColor: "#FFFFFF", nextState:"taking"
-            state "taking", label:'Taking', action: "", icon: "st.camera.take-photo", backgroundColor: "#53a7c0"
-            state "image", label: "Take", action: "Image Capture.take", icon: "st.camera.camera", backgroundColor: "#FFFFFF", nextState:"taking"
+    	   standardTile("status", "device.status", width: 2, height: 2) {
+            state("closed", label:'${name}', icon:"st.doors.garage.garage-closed", action: "actuate", backgroundColor:"#79b821", nextState:"opening")
+            state("open", label:'${name}', icon:"st.doors.garage.garage-open", action: "actuate", backgroundColor:"#ffa81e", nextState:"closing")
+            state("opening", label:'${name}', icon:"st.doors.garage.garage-opening", backgroundColor:"#ffe71e")
+            state("closing", label:'${name}', icon:"st.doors.garage.garage-closing", backgroundColor:"#ffe71e")
         }
-
-        standardTile("refresh", "command.refresh", inactiveLabel: false) {
-        	state "default", label:'refresh', action:"refresh.refresh", icon:"st.secondary.refresh-icon"        
-    	}
-        standardTile("motion", "device.switch", width: 1, height: 1, canChangeIcon: false) {
-			state "off", label: 'Motion Off', action: "switch.on", icon: "st.motion.motion.inactive", backgroundColor: "#ccffcc", nextState: "toggle"
-       	state "on", label: 'Motion On', action: "switch.off", icon: "st.motion.motion.active", backgroundColor: "#EE0000", nextState: "toggle"            
-		}         
-       controlTile("levelSliderControl", "device.level", "slider", height: 1, width: 2, inactiveLabel: false, range:"(0..100)") {
-            state "level", action:"switch level.setLevel"
-        }
-        
-        main "motion"
-        details(["cameraDetails", "take", "motion", "PIR", "refresh", "levelSliderControl"])
     }
 }
 
 def initialize() {
+    login()
     refresh()
 }
 
 def getwebtoken(){
 }
-
-def on(){
+def open(door)
+{
 	log.debug "webtoken = ${state.webtoken}"
+    call "GET","/isg/opendoor.php?numdoor=$door&status0"
 }
-def off(){}
+def close(door)
+{
+	log.debug "webtoken = ${state.webtoken}"
+    call "GET","/isg/opendoor.php?numdoor=$door&status1"
+}
+
+def open(){
+	log.debug "webtoken = ${state.webtoken}"
+   open 3
+}
+def close(){
+	close 3
+}
+
+//https://community.smartthings.com/t/device-attribute-syntax-from-within-a-device-type/9388/2
 
 def parse(String description) {
 
-	   log.debug "Parsing '${description}'"
-    def map = [:]
-	def retResult = []
-	def descMap = parseDescriptionAsMap(description)
-    def msg = parseLanMessage(description)
-    log.debug "status ${msg.status}"
-    log.debug "data ${msg.headers}"
-        
-        try {
-			log.debug "getting token"
-			//def pattern = Pattern.compile("webtoken.*value=\"(?<webtoken>.*)\"")
-			def match = msg.body =~ "\"webtoken\".*value=\"(?<webtoken>.*)\""
+	try {
+        def map = [:]
+        def retResult = []
+                log.debug "a5"
 
-           state.webtoken= match[0][1]           
+       // def descMap = parseDescriptionAsMap(description.headers)
+        log.debug "a4"
+        def msg = parseLanMessage(description)
+                log.debug "a3"
+
+        log.debug "status ${msg.status}"
+                log.debug "a2"
+
+        log.debug "data ${msg.headers}"
+        if (msg.headers.get("set-cookie")){
+        	def cookiefind = msg.headers.get("set-cookie").split(";")[0]
+			state.cookie =cookiefind
+            log.debug "cookie ${cookiefind}"
+        }
+        log.debug "a1"
+        log.debug "body ${msg.body}"
+
+        if (msg.body.substring(0,2)=="{\""){
+        	def slurp = new groovy.json.JsonSlurper()
+            def doors = slurp.parseText(msg.body)
+        	log.debug ("door 1 ${doors.get('1')}")
+        	log.debug ("door 2 ${doors.get("2")}")
+        	log.debug ("door 3 ${doors.get("3")}")
+            
+        }
+        else{
+                log.debug "getting token"
+                try{
+                //def pattern = Pattern.compile("webtoken.*value=\"(?<webtoken>.*)\"")
+                def match = msg.body =~ "\"webtoken\".*value=\"(?<webtoken>.*)\""
+
+               state.webtoken= match[0][1]
+               }
+               catch (e)
+               {
+               log.debug "bugger2"
+
+               }
+            }
         }
         catch (e){
 	log.debug "bugger"
     		log.debug e
         }
-}
+    }
+
 
 
 def parseDescriptionAsMap(description) {
@@ -134,7 +167,11 @@ private getHostAddress() {
 }
 
 def refresh(){
-
+ call "GET","/isg/statusDoorAll.php?status1=0&status2=undefined&status3=undefined&access=1"
+ 	
+ }
+ def login(){
+ 
 	log.debug "Refresh"
 	def host = CameraIP 
     def hosthex = convertIPtoHex(host)
@@ -170,4 +207,40 @@ def refresh(){
     }
   
   
+}
+
+def call(method,path){
+
+	log.debug "Refresh"
+	def host = CameraIP 
+    def hosthex = convertIPtoHex(host)
+    def porthex = convertPortToHex(CameraPort)
+    device.deviceNetworkId = "$hosthex:$porthex" 
+    
+    log.debug "The device id configured is: $device.deviceNetworkId"
+    log.debug "path is: $path"
+    
+    def headers = [:] 
+    headers.put("HOST", "$host:$CameraPort")
+    headers.put("Cookie",state.cookie)
+    headers.put("Accept","application/json")
+    log.debug "The Header is $headers"
+   def fullpath = "$path&login=admin&webtoken=${state.webtoken}"
+    
+  try {
+    def hubAction = new physicalgraph.device.HubAction(
+    	method: method,
+    	path: fullpath,
+    	headers: headers,
+        body:body
+        )
+        	
+   
+    log.debug hubAction
+    return hubAction
+    
+    }
+    catch (Exception e) {
+    	log.debug "Hit Exception $e on $hubAction"
+    }
 }
